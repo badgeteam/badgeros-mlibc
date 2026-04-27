@@ -49,18 +49,7 @@ char *stpcpy(char *__restrict dest, const char *__restrict src) {
 }
 
 char *stpncpy(char *__restrict dest, const char *__restrict src, size_t n) {
-	size_t nulls, copied, srcLen = strlen(src);
-	if (n >= srcLen) {
-		nulls = n - srcLen;
-		copied = srcLen;
-	} else {
-		nulls = 0;
-		copied = n;
-	}
-
-	memcpy(dest, src, copied);
-	memset(dest + srcLen, 0, nulls);
-	return dest + n - nulls;
+	return mlibc::stpncpy(dest, src, n);
 }
 
 size_t strnlen(const char *s, size_t n) {
