@@ -445,8 +445,15 @@ int strcoll(const Char *a, const Char *b, const mlibc::localeinfo *l) {
 	using P = CollationPolicy<Char>;
 
 	const auto nrules = l->collate.get(_NL_COLLATE_NRULES).asUint32();
-	if (!nrules)
-		return frg::generic_strcmp(a, b);
+	if (!nrules) {
+		int cmp = frg::generic_strcmp(a, b);
+
+		if constexpr (std::is_same_v<Char, char>) {
+			return cmp;
+		} else {
+			return (cmp > 0) - (cmp < 0); // same as std::clamp(cmp, -1, 1)
+		}
+	}
 
 	if (*a == '\0' || *b == '\0')
 		return (*a != '\0') - (*b != '\0');
