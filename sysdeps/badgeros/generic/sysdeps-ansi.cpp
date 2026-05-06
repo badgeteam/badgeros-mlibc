@@ -33,9 +33,15 @@ void Sysdeps<Exit>::operator()(int status) {
 
 int Sysdeps<Close>::operator()(int fd) { return -__syscall_fs_close(fd); }
 
-int Sysdeps<FutexWake>::operator()(int *, bool) { STUB(); }
+int Sysdeps<FutexWake>::operator()(int *, bool) {
+	// TODO: Proper impl would make a syscall to notify.
+	return 0;
+}
 
-int Sysdeps<FutexWait>::operator()(int *, int, timespec const *) { STUB(); }
+int Sysdeps<FutexWait>::operator()(int *, int, timespec const *) {
+	// TODO: Proper impl
+	return 0;
+}
 
 int Sysdeps<ReadEntries>::operator()(int fd, void *buffer, size_t max_size, size_t *bytes_read) {
 	auto res = __syscall_fs_getdents(fd, buffer, max_size);
