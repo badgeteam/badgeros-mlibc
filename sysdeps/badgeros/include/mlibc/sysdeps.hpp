@@ -5,10 +5,59 @@
 namespace mlibc {
 
 struct BadgerOSSysdepTags :
-#if defined(__riscv)
+    /* Base sysdeps */
+    LibcLog,
+    LibcPanic,
+    // FutexTid,
+    AnonAllocate,
+    AnonFree,
+    Stat,
+    VmMap,
+    VmUnmap,
+    VmProtect,
+    TcbSet,
+#ifdef __riscv
 // RiscvHwprobe,
-#endif
+#endif // __riscv
 
+    /* ANSI sysdeps */
+    Exit,
+    // ThreadExit,
+    // PrepareStack,
+    // Clone,
+    FutexWait,
+    FutexWake,
+    Open,
+    // Flock,
+    OpenDir,
+    ReadEntries,
+    Read,
+    Write,
+    // Pread,
+    Seek,
+    Close,
+    ClockGet,
+    // ClockSet,
+    // ClockGetres,
+    // Sleep,
+    Isatty,
+    Rmdir,
+    Unlinkat,
+    Rename,
+    // FdToPath,
+    Sigprocmask,
+    Sigaction,
+    Fork,
+    Waitpid,
+    Execve,
+    // Yield,
+    GetPid,
+    Kill,
+
+    /* Building RTLD */
+    // VmReadahead,
+
+    /* POSIX sysdeps */
     // Readv,
     // Writev,
     // Pwrite,
@@ -62,6 +111,7 @@ struct BadgerOSSysdepTags :
     GetCwd,
     Chdir,
     Fchdir,
+    // Chroot,
     Mkdir,
     Mkdirat,
     Link,
@@ -99,6 +149,7 @@ struct BadgerOSSysdepTags :
     // Poll,
     // Ppoll,
     // Ioctl,
+    // PosixDevctl,
     // GetSockopt,
     // SetSockopt,
     // Shutdown,
@@ -128,6 +179,7 @@ struct BadgerOSSysdepTags :
     // Madvise,
     // PosixMadvise,
     // Msync,
+    // GetItimer,
     // SetItimer,
     // TimerCreate,
     // TimerSettime,
@@ -135,7 +187,7 @@ struct BadgerOSSysdepTags :
     // TimerDelete,
     // TimerGetoverrun,
     // Times,
-    Uname,
+    Uname
 // Pause,
 // SetResuid,
 // SetResgid,
@@ -157,6 +209,7 @@ struct BadgerOSSysdepTags :
 // GetThreadaffinity,
 // SetAffinity,
 // SetThreadaffinity,
+// GetCurrentStackInfo,
 // Waitid,
 // NameToHandleAt,
 // Splice,
@@ -166,6 +219,7 @@ struct BadgerOSSysdepTags :
 // Shmget,
 // InetConfigured,
 // Nice,
+// Openpt,
 // Msgctl,
 // Msgget,
 // Msgrcv,
@@ -176,140 +230,91 @@ struct BadgerOSSysdepTags :
 // MqGetAttr,
 // MqSetAttr,
 
-#if __MLIBC_BSD_OPTION
+/* Linux sysdeps */
+// InotifyCreate,
+// InotifyAddWatch,
+// InotifyRmWatch,
+// Mount,
+// Umount2,
+// Ptrace,
+// Capget,
+// Capset,
+// Prctl,
+// InitModule,
+// DeleteModule,
+// Klogctl,
+// Getcpu,
+// Sysinfo,
+// Swapon,
+// Swapoff,
+// Setxattr,
+// Lsetxattr,
+// Fsetxattr,
+// Getxattr,
+// Lgetxattr,
+// Fgetxattr,
+// Listxattr,
+// Llistxattr,
+// Flistxattr,
+// Removexattr,
+// Lremovexattr,
+// Fremovexattr,
+// Statfs,
+// Fstatfs,
+// Statx,
+// Getifaddrs,
+// Sendfile,
+// Syncfs,
+// Unshare,
+// SetNs,
+// PidfdOpen,
+// PidfdGetpid,
+// PidfdSendSignal,
+// ProcessVmReadv,
+// ProcessVmWritev,
+// Fsopen,
+// Fsmount,
+// Fsconfig,
+// MoveMount,
+// OpenTree,
+// CopyFileRange,
+
+/* Linux epoll sysdeps */
+// EpollCreate,
+// EpollCtl,
+// EpollPwait,
+
+/* Linux timerfd sysdeps */
+// TimerfdCreate,
+// TimerfdSettime,
+// TimerfdGettime,
+
+/* Linux signalfd sysdeps */
+// SignalfdCreate,
+
+/* Linux eventfd sysdeps */
+// EventfdCreate,
+
+/* Linux reboot sysdeps */
+// Reboot,
+
+/* Linux wrappers sysdeps */
+// RtSigqueueinfo,
+// RtTgSigqueueinfo,
+
+/* BSD sysdeps */
 // Brk,
 // GetLoadavg,
-#endif // __MLIBC_BSD_OPTION
+// Openpty,
 
-#if __MLIBC_GLIBC_OPTION
+/* GLIBC timerfd sysdeps */
 // Personality,
 // Ioperm,
 // Iopl,
-#endif // __MLIBC_GLIBC_OPTION
-
-#if __MLIBC_LINUX_OPTION
-    InotifyCreate,
-    InotifyAddWatch,
-    InotifyRmWatch,
-    Mount,
-    Umount2,
-    Ptrace,
-    Capget,
-    Capset,
-    Prctl,
-    InitModule,
-    DeleteModule,
-    Klogctl,
-    Getcpu,
-    Sysinfo,
-    Swapon,
-    Swapoff,
-    Setxattr,
-    Lsetxattr,
-    Fsetxattr,
-    Getxattr,
-    Lgetxattr,
-    Fgetxattr,
-    Listxattr,
-    Llistxattr,
-    Flistxattr,
-    Removexattr,
-    Lremovexattr,
-    Fremovexattr,
-    Statfs,
-    Fstatfs,
-    Statx,
-    Getifaddrs,
-    Sendfile,
-    Syncfs,
-    Unshare,
-    SetNs,
-    PidfdOpen,
-    PidfdGetpid,
-    PidfdSendSignal,
-    ProcessVmReadv,
-    ProcessVmWritev,
-    Fsopen,
-    Fsmount,
-    Fsconfig,
-    MoveMount,
-    OpenTree,
-    CopyFileRange,
-#endif // __MLIBC_LINUX_OPTION
-
-#if __MLIBC_LINUX_EPOLL_OPTION
-    EpollCreate,
-    EpollCtl,
-    EpollPwait,
-#endif // __MLIBC_LINUX_EPOLL_OPTION
-
-#if __MLIBC_LINUX_TIMERFD_OPTION
-    TimerfdCreate,
-    TimerfdSettime,
-    TimerfdGettime,
-#endif // __MLIBC_LINUX_TIMERFD_OPTION
-
-#if __MLIBC_LINUX_SIGNALFD_OPTION
-    SignalfdCreate,
-#endif // __MLIBC_LINUX_SIGNALFD_OPTION
-
-#if __MLIBC_LINUX_EVENTFD_OPTION
-    EventfdCreate,
-#endif // __MLIBC_LINUX_EVENTFD_OPTION
-
-#if __MLIBC_LINUX_REBOOT_OPTION
-    Reboot,
-#endif // __MLIBC_LINUX_REBOOT_OPTION
-
-#if __MLIBC_LINUX_WRAPPERS_OPTION
-    RtSigqueueinfo,
-    RtTgSigqueueinfo,
-#endif // __MLIBC_LINUX_WRAPPERS_OPTION
-
-    LibcLog,
-    LibcPanic,
-    // FutexTid,
-    AnonAllocate,
-    AnonFree,
-    Stat,
-    VmMap,
-    VmUnmap,
-    VmProtect,
-    TcbSet,
-    Exit,
-// ThreadExit,
-#if __MLIBC_POSIX_OPTION
-// PrepareStack,
-// Clone,
-#endif // __MLIBC_POSIX_OPTION
-    FutexWait,
-    FutexWake,
-    Open,
-    // Flock,
-    OpenDir,
-    ReadEntries,
-    Read,
-    Write,
-    // Pread,
-    Seek,
-    Close,
-    ClockGet,
-    // ClockSet,
-    // ClockGetres,
-    // Sleep,
-    Isatty,
-    Rmdir,
-    Unlinkat,
-    Rename,
-    // FdToPath,
-    Sigprocmask,
-    Sigaction,
-    Fork,
-    Waitpid,
-    Execve,
-    // Yield,
-    GetPid,
-    Kill {
+#ifdef __riscv
+// RiscvFlushIcache,
+#endif // __riscv
+{
 };
 
 template <typename Tag>
