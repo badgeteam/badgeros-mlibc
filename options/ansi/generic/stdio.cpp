@@ -11,21 +11,21 @@
 #include <math.h>
 
 #include <abi-bits/fcntl.h>
-
 #include <bits/ensure.h>
-
-#include <mlibc/lock.hpp>
+#include <frg/expected.hpp>
+#include <frg/mutex.hpp>
+#include <frg/printf.hpp>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
+#include <mlibc/ctype.hpp>
 #include <mlibc/debug.hpp>
 #include <mlibc/file-io.hpp>
-#include <mlibc/locale.hpp>
-#include <mlibc/ansi-sysdeps.hpp>
-#include <mlibc/stdlib.hpp>
 #include <mlibc/global-config.hpp>
-#include <mlibc/ctype.hpp>
-#include <frg/mutex.hpp>
-#include <frg/expected.hpp>
-#include <frg/printf.hpp>
+#include <mlibc/locale.hpp>
+#include <mlibc/lock.hpp>
+#include <mlibc/stdlib.hpp>
+#include <mlibc/strings.hpp>
+#include <mlibc/wide.hpp>
 
 template<typename Char, typename F>
 struct PrintfAgent {
@@ -273,6 +273,10 @@ wint_t fgetwc_unlocked(mlibc::abstract_file *f) {
 		return WEOF;
 	}
 
+	// POSIX: If the EOF indicator is set, return WEOF.
+	if (f->__status_bits & __MLIBC_EOF_BIT)
+		return WEOF;
+
 	mbstate_t state = { };
 	size_t conversion_res = 0;
 	wchar_t wc = L'\0';
@@ -282,9 +286,11 @@ wint_t fgetwc_unlocked(mlibc::abstract_file *f) {
 		char c = '\0';
 		int err = f->read(&c, 1, &read);
 		if (err) {
+			f->__status_bits |= __MLIBC_ERROR_BIT;
 			errno = err;
 			return WEOF;
 		} else if (!read) {
+			f->__status_bits |= __MLIBC_EOF_BIT;
 			return WEOF;
 		}
 
@@ -315,11 +321,15 @@ wint_t ungetwc_unlocked(wint_t c, mlibc::abstract_file *f) {
 	if (encoding == size_t(-1))
 		return WEOF;
 
-	for (size_t i = 0; i < encoding; i--) {
-		int ret = f->unget(buf[i]);
+	for (size_t i = 0; i < encoding; i++) {
+		int ret = f->unget(buf[encoding - 1 - i]);
 		if (ret == EOF)
 			return WEOF;
 	}
+
+	// POSIX: A successful call to ungetwc shall clear the EOF indicator for the stream.
+	if (encoding)
+		f->__status_bits &= ~__MLIBC_EOF_BIT;
 
 	return c;
 }
@@ -332,21 +342,30 @@ int fputws_unlocked(const wchar_t *__restrict ws, mlibc::abstract_file *f) {
 	}
 
 	char buf[512];
-	auto len = wcsrtombs(buf, (const wchar_t **__restrict)&ws, sizeof(buf), &f->_mbstate);
-	if (len == size_t(-1))
-		return -1;
 
-	while (ws && len) {
+	while (ws) {
+		auto len = wcsrtombs(buf, (const wchar_t **__restrict)&ws, sizeof(buf), &f->_mbstate);
+		if (len == size_t(-1))
+			return -1;
+
 		auto written = fwrite_unlocked_ignore_orientation(buf, 1, len, f);
 		if (written != len)
 			return 1;
 
-		len = wcsrtombs(buf, (const wchar_t **__restrict)&ws, sizeof(buf), &f->_mbstate);
-		if (len == size_t(-1))
-			return -1;
+		if (len == 0)
+			break;
 	}
 
 	return 1;
+}
+
+template <typename From, typename To = std::conditional_t<std::is_same_v<From, char>, wchar_t, char>>
+size_t convertString(To *dest, const From **__restrict src, size_t src_max, size_t dest_max, mbstate_t *__restrict ps) {
+	if constexpr (std::is_same_v<From, char>) {
+		return mbsnrtowcs(dest, src, src_max, dest_max, ps);
+	} else {
+		return wcsnrtombs(dest, src, src_max, dest_max, ps);
+	}
 }
 
 } // namespace
@@ -400,48 +419,18 @@ struct StreamPrinter {
 		}
 	}
 
-	void append(const char *str, size_t n)
-	requires (std::is_same_v<Char, wchar_t>) {
-		wchar_t buf[512];
+	template <typename C>
+	void append(const C *str, size_t n)
+	requires (!std::is_same_v<Char, C>) {
+		Char buf[512];
 		mbstate_t state = { };
 
-		const char *curr = str;
-		size_t remaining = n;
+		const C *curr = str;
 
-		while (remaining > 0 && curr) {
-			const char *start = curr;
+		while (n > 0 && curr) {
+			const C *start = curr;
 
-			size_t num_wchars = mbsnrtowcs(buf, &curr, remaining, sizeof(buf), &state);
-			if (num_wchars == size_t(-1))
-				return;
-
-			append(buf, num_wchars);
-
-			if (!curr) {
-				break;
-			} else {
-				size_t consumed = curr - start;
-
-				if (consumed > remaining || !consumed)
-					break;
-
-				remaining -= consumed;
-			}
-		}
-	}
-
-	void append(const wchar_t *str, size_t n)
-	requires (std::is_same_v<Char, char>) {
-		char buf[512];
-		mbstate_t state = { };
-
-		const wchar_t *curr = str;
-		size_t remaining = n;
-
-		while (remaining > 0 && curr) {
-			const wchar_t *start = curr;
-
-			size_t num_chars = wcsnrtombs(buf, &curr, remaining, sizeof(buf), &state);
+			size_t num_chars = convertString(buf, &curr, n, sizeof(buf) / sizeof(*buf), &state);
 			if (num_chars == size_t(-1))
 				return;
 
@@ -452,17 +441,56 @@ struct StreamPrinter {
 			} else {
 				size_t consumed = curr - start;
 
-				if (consumed > remaining || !consumed)
+				if (consumed > n || !consumed)
 					break;
 
-				remaining -= consumed;
+				n -= consumed;
 			}
 		}
+	}
+
+	template <typename C>
+	void append(const C *str, size_t src_max, size_t dest_max)
+	requires (!std::is_same_v<Char, C>) {
+		Char buf[512];
+		mbstate_t state = { };
+		const C *curr = str;
+
+		while (src_max > 0 && dest_max > 0 && curr) {
+			const C *start = curr;
+
+			size_t num_chars = convertString(buf, &curr, frg::min(sizeof(buf), src_max), dest_max, &state);
+			if (num_chars == size_t(-1))
+				return;
+
+			append(buf, num_chars);
+			dest_max -= num_chars;
+
+			if (!curr) {
+				break;
+			} else {
+				size_t consumed = curr - start;
+
+				if (consumed > src_max || !consumed)
+					break;
+
+				src_max -= consumed;
+			}
+		}
+	}
+
+	void append(const Char *str, size_t src_max, size_t dest_max) {
+		append(str, frg::min(src_max, dest_max));
 	}
 
 	mlibc::abstract_file *stream;
 	size_t count;
 };
+
+static_assert(frg::SinkFor<StreamPrinter<char>>);
+static_assert(frg::SinkFor<StreamPrinter<char>, wchar_t>);
+static_assert(frg::SinkFor<StreamPrinter<wchar_t>>);
+static_assert(frg::SinkFor<StreamPrinter<wchar_t>, wchar_t>);
 
 template <typename Char>
 struct BufferPrinter {
@@ -476,83 +504,64 @@ struct BufferPrinter {
 		count++;
 	}
 
-	void append(const Char *str) {
-		for(size_t i = 0; str[i]; i++) {
-			buffer[count] = str[i];
-			count++;
-		}
-	}
-
-	void append(const Char *str, size_t n) {
-		for(size_t i = 0; i < n; i++) {
-			buffer[count] = str[i];
-			count++;
-		}
-	}
-
-	void append(const char *str, size_t n)
+	void append(char c)
 	requires (std::is_same_v<Char, wchar_t>) {
-		wchar_t buf[512];
-		mbstate_t state = { };
-
-		const char *curr = str;
-		size_t remaining = n;
-
-		while (remaining > 0 && curr) {
-			const char *start = curr;
-
-			size_t num_wchars = mbsnrtowcs(buf, &curr, remaining, sizeof(buf), &state);
-			if (num_wchars == size_t(-1))
-				return;
-
-			append(buf, num_wchars);
-
-			if (!curr) {
-				break;
-			} else {
-				size_t consumed = curr - start;
-
-				if (consumed > remaining)
-					break;
-
-				remaining -= consumed;
-			}
-		}
+		auto ret = btowc(c);
+		if (ret != WEOF)
+			buffer[count++] = ret;
 	}
 
-	void append(const wchar_t *str, size_t n)
+	void append(wchar_t wc)
 	requires (std::is_same_v<Char, char>) {
-		char buf[512];
-		mbstate_t state = { };
+		mbstate_t state = {};
+		auto ret = wcrtomb(buffer + count, wc, &state);
+		if (ret != static_cast<size_t>(-1))
+			count += ret;
+	}
 
-		const wchar_t *curr = str;
-		size_t remaining = n;
+	template <typename C>
+	void append(const C *s) {
+		auto str_len = frg::generic_strlen(s);
+		append(s, str_len, SIZE_MAX);
+	}
 
-		while (remaining > 0 && curr) {
-			const wchar_t *start = curr;
+	template <typename C>
+	void append(const C *str, size_t n) {
+		append(str, n, SIZE_MAX);
+	}
 
-			size_t num_chars = wcsnrtombs(buf, &curr, remaining, sizeof(buf), &state);
-			if (num_chars == size_t(-1))
-				return;
+	void append(const char *str, size_t src_max, size_t dest_max)
+	requires (std::is_same_v<Char, char>) {
+		auto str_len = frg::min(mlibc::strnlen(str, src_max), dest_max);
+		memcpy(buffer + count, str, str_len);
+		count += str_len;
+	}
 
-			append(buf, num_chars);
+	void append(const wchar_t *str, size_t src_max, size_t dest_max)
+	requires (std::is_same_v<Char, wchar_t>) {
+		auto str_len = frg::min(mlibc::wcsnlen(str, src_max), dest_max);
+		wcsncpy(buffer + count, str, str_len);
+		count += str_len;
+	}
 
-			if (!curr) {
-				break;
-			} else {
-				size_t consumed = curr - start;
-
-				if (consumed > remaining || !consumed)
-					break;
-
-				remaining -= consumed;
-			}
-		}
+	template <typename C>
+	void append(const C *str, size_t src_max, size_t dest_max)
+	requires (!std::is_same_v<C, Char>) {
+		const C *src = str;
+		mbstate_t state = {};
+		size_t written = convertString(buffer + count, &src, src_max, dest_max, &state);
+		if (written != static_cast<size_t>(-1))
+			count += written;
 	}
 
 	Char *buffer;
 	size_t count;
 };
+
+static_assert(frg::SinkFor<BufferPrinter<char>>);
+static_assert(frg::SinkFor<BufferPrinter<char>, wchar_t>);
+static_assert(frg::SinkFor<BufferPrinter<wchar_t>>);
+static_assert(frg::SinkFor<BufferPrinter<wchar_t>, wchar_t>);
 
 template <typename Char>
 struct LimitedPrinter {
@@ -567,96 +576,107 @@ struct LimitedPrinter {
 		count++;
 	}
 
-	void append(const char *str) {
-		for(size_t i = 0; str[i]; i++)
-			append(str[i]);
-	}
-
-	void append(const wchar_t *ws) {
-		for(size_t i = 0; ws[i]; i++)
-			append(ws[i]);
-	}
-
-	void append(const char *str, size_t n)
-	requires (std::is_same_v<Char, char>) {
-		for(size_t i = 0; str[i] && n; i++, n--)
-			append(str[i]);
-	}
-
-	void append(const char *str, size_t n)
+	void append(char c)
 	requires (std::is_same_v<Char, wchar_t>) {
-		wchar_t buf[512];
-		mbstate_t state = { };
-
-		const char *curr = str;
-		size_t remaining = frg::min(n, limit - count);
-
-		while (remaining > 0 && curr) {
-			const char *start = curr;
-
-			size_t num_wchars = mbsnrtowcs(buf, &curr, remaining, sizeof(buf), &state);
-			if (num_wchars == size_t(-1))
-				return;
-
-			append(buf, num_wchars);
-
-			if (!curr) {
-				break;
-			} else {
-				size_t consumed = curr - start;
-
-				if (consumed > remaining)
-					break;
-
-				remaining -= consumed;
-			}
+		if (count < limit) {
+			auto ret = btowc(c);
+			if (ret != WEOF)
+				buffer[count++] = ret;
+		} else {
+			count++;
 		}
 	}
 
-	void append(const wchar_t *ws, size_t n)
-	requires (std::is_same_v<Char, wchar_t>) {
-		if (count == limit)
-			return;
-
-		for(size_t i = 0; ws[i] && n; i++, n--)
-			append(ws[i]);
-		count += n;
-	}
-
-	void append(const wchar_t *str, size_t n)
+	void append(wchar_t wc)
 	requires (std::is_same_v<Char, char>) {
-		char buf[512];
-		mbstate_t state = { };
-
-		const wchar_t *curr = str;
-		size_t remaining = frg::min(n, limit - count);
-
-		while (remaining > 0 && curr) {
-			const wchar_t *start = curr;
-
-			size_t num_chars = wcsnrtombs(buf, &curr, remaining, sizeof(buf), &state);
-			if (num_chars == size_t(-1))
-				return;
-
-			append(buf, num_chars);
-
-			if (!curr) {
-				break;
-			} else {
-				size_t consumed = curr - start;
-
-				if (consumed > remaining || !consumed)
-					break;
-
-				remaining -= consumed;
-			}
+		mbstate_t state = {};
+		if (count < limit) {
+			auto ret = wcrtomb(buffer + count, wc, &state);
+			if (ret != static_cast<size_t>(-1))
+				count += ret;
+		} else {
+			char mb[MB_CUR_MAX];
+			auto ret = wcrtomb(mb, wc, &state);
+			if (ret != static_cast<size_t>(-1))
+				count += ret;
 		}
 	}
 
+	template <typename C>
+	void append(const C *s) {
+		auto str_len = frg::generic_strlen(s);
+		append(s, str_len, SIZE_MAX);
+	}
+
+	template <typename C>
+	void append(const C *str, size_t n) {
+		append(str, n, SIZE_MAX);
+	}
+
+	void append(const char *str, size_t src_max, size_t dest_max)
+	requires (std::is_same_v<Char, char>) {
+		auto str_len = mlibc::strnlen(str, src_max);
+		auto copy_len = frg::min(str_len, frg::min(dest_max, remaining()));
+		strncpy(buffer + count, str, copy_len);
+		count += str_len;
+	}
+
+	void append(const char *str, size_t src_max, size_t dest_max)
+	requires (std::is_same_v<Char, wchar_t>) {
+		const char *src = str;
+		mbstate_t state = {};
+		size_t total = mbsnrtowcs(nullptr, &src, src_max, 0, &state);
+
+		if (count < limit) {
+			src = str;
+			state = {};
+			mbsnrtowcs(buffer + count, &src, src_max, frg::min(dest_max, remaining()), &state);
+		}
+
+		count += frg::min(total, dest_max);
+	}
+
+	void append(const wchar_t *str, size_t src_max, size_t dest_max)
+	requires (std::is_same_v<Char, char>) {
+		const wchar_t *src = str;
+		mbstate_t state = {};
+		size_t total = wcsnrtombs(nullptr, &src, src_max, 0, &state);
+
+		if (count < limit) {
+			src = str;
+			state = {};
+			wcsnrtombs(buffer + count, &src, src_max, frg::min(dest_max, remaining()), &state);
+		}
+
+		count += frg::min(total, dest_max);
+	}
+
+	void append(const wchar_t *str, size_t src_max, size_t dest_max)
+	requires (std::is_same_v<Char, wchar_t>) {
+		auto str_len = mlibc::wcsnlen(str, src_max);
+		auto copy_len = frg::min(str_len, frg::min(dest_max, remaining()));
+		wcsncpy(buffer + count, str, copy_len);
+		count += str_len;
+	}
+
+	size_t remaining() const {
+		if (count < limit)
+			return limit - count;
+		return 0;
+	}
+
+	// The number of valid bytes in the buffer is min(limit, count).
 	Char *buffer;
+	// Maximum number of charcters to output.
 	size_t limit;
+	// Tracks the number of characters that would be output.
 	size_t count;
 };
+
+static_assert(frg::SinkFor<LimitedPrinter<char>>);
+static_assert(frg::SinkFor<LimitedPrinter<char>, wchar_t>);
+static_assert(frg::SinkFor<LimitedPrinter<wchar_t>>);
+static_assert(frg::SinkFor<LimitedPrinter<wchar_t>, wchar_t>);
 
 struct ResizePrinter {
 	using char_type = char;
@@ -693,6 +713,10 @@ struct ResizePrinter {
 			append(str[i]);
 	}
 
+	void append(const char *str, size_t n, size_t m) {
+		return append(str, frg::min(n, m));
+	}
+
 	void append(const wchar_t *str, size_t n) {
 		char buf[512];
 		mbstate_t state = { };
@@ -727,18 +751,19 @@ struct ResizePrinter {
 	size_t count;
 };
 
+static_assert(frg::SinkFor<ResizePrinter>);
+
 int remove(const char *filename) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_rmdir, -1);
-	if(int e = mlibc::sys_rmdir(filename); e) {
+	if(int e = mlibc::sysdep_or_enosys<Rmdir>(filename); e) {
 		if (e == ENOTDIR) {
-			MLIBC_CHECK_OR_ENOSYS(mlibc::sys_unlinkat, -1);
-			if(e = mlibc::sys_unlinkat(AT_FDCWD, filename, 0); e) {
+			if(e = mlibc::sysdep_or_enosys<Unlinkat>(AT_FDCWD, filename, 0); e) {
 				errno = e;
 				return -1;
 			}
 
 			return 0;
 		}
+		errno = e;
 		return -1;
 	}
 
@@ -746,8 +771,7 @@ int remove(const char *filename) {
 }
 
 int rename(const char *path, const char *new_path) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_rename, -1);
-	if(int e = mlibc::sys_rename(path, new_path); e) {
+	if(int e = mlibc::sysdep_or_enosys<Rename>(path, new_path); e) {
 		errno = e;
 		return -1;
 	}
@@ -755,7 +779,7 @@ int rename(const char *path, const char *new_path) {
 }
 
 FILE *tmpfile(void) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_unlinkat, nullptr);
+	MLIBC_CHECK_OR_ENOSYS(mlibc::IsImplemented<Unlinkat>, nullptr);
 
 	int fd = 0;
 	char pattern[] = "/tmp/tmpfile_XXXXXX";
@@ -763,9 +787,9 @@ FILE *tmpfile(void) {
 	if (res)
 		return nullptr;
 
-	res = mlibc::sys_unlinkat(AT_FDCWD, pattern, 0);
+	res = mlibc::sysdep_or_panic<Unlinkat>(AT_FDCWD, pattern, 0);
 	if (res) {
-		mlibc::sys_close(fd);
+		mlibc::sysdep<Close>(fd);
 		errno = res;
 		return nullptr;
 	}
@@ -784,9 +808,9 @@ char *tmpnam(char *buf) {
 			return nullptr;
 
 		int fd;
-		ret = mlibc::sys_open(result, O_RDONLY, 0666, &fd);
+		ret = mlibc::sysdep<Open>(result, O_RDONLY, 0666, &fd);
 		if (ret == 0) {
-			mlibc::sys_close(fd);
+			mlibc::sysdep<Close>(fd);
 		} else {
 			return result;
 		}
@@ -801,8 +825,8 @@ FILE *freopen(const char *__restrict path, const char *__restrict mode, FILE *__
 	auto file = static_cast<mlibc::abstract_file *>(f);
 	frg::unique_lock lock(file->_lock);
 
-	if(file->reopen(path, mode) == -1) {
-		errno = EINVAL;
+	if(int e = file->reopen(path, mode); e) {
+		errno = e;
 		return nullptr;
 	}
 
@@ -824,6 +848,7 @@ void setbuffer(FILE *f, char *buf, size_t size) {
 
 // byte-oriented (POSIX)
 int fprintf(FILE *__restrict stream, const char *__restrict format, ...) {
+	// orientation checking in vfprintf
 	va_list args;
 	va_start(args, format);
 	int result = vfprintf(stream, format, args);
@@ -833,6 +858,7 @@ int fprintf(FILE *__restrict stream, const char *__restrict format, ...) {
 
 // byte-oriented (POSIX)
 int fscanf(FILE *__restrict stream, const char *__restrict format, ...) {
+	// orientation checking in vfscanf
 	va_list args;
 	va_start(args, format);
 	int result = vfscanf(stream, format, args);
@@ -842,6 +868,7 @@ int fscanf(FILE *__restrict stream, const char *__restrict format, ...) {
 
 // byte-oriented (POSIX)
 int printf(const char *__restrict format, ...) {
+	// orientation checking in vfprintf
 	va_list args;
 	va_start(args, format);
 	int result = vfprintf(stdout, format, args);
@@ -1234,9 +1261,12 @@ int do_scanf(H &handler, const Char *fmt, __builtin_va_list args) {
 
 				if(c == '-') {
 					handler.consume();
+					c = handler.look_ahead();
 					is_negative = true;
-				} else if(c == '+')
+				} else if(c == '+') {
 					handler.consume();
+					c = handler.look_ahead();
+				}
 
 				if (c == '0') {
 					handler.consume();
@@ -1435,7 +1465,8 @@ int do_scanf(H &handler, const Char *fmt, __builtin_va_list args) {
 				}
 				NOMATCH_CHECK(count == 0);
 				void **typed_dest = (void **)dest;
-				*typed_dest = (void *)(uintptr_t)res;
+				if (typed_dest)
+					*typed_dest = (void *)(uintptr_t)res;
 				break;
 			}
 			case 'n': {
@@ -1656,6 +1687,7 @@ int do_scanf(H &handler, const Char *fmt, __builtin_va_list args) {
 
 // byte-oriented (POSIX)
 int scanf(const char *__restrict format, ...) {
+	// orientation checking in vfscanf
 	va_list args;
 	va_start(args, format);
 	int result = vfscanf(stdin, format, args);
@@ -1691,6 +1723,13 @@ int sscanf(const char *__restrict buffer, const char *__restrict format, ...) {
 
 // byte-oriented (POSIX)
 int vfprintf(FILE *__restrict stream, const char *__restrict format, __builtin_va_list args) {
+	auto f = static_cast<mlibc::abstract_file *>(stream);
+	if (!f->check_orientation(mlibc::stream_orientation::byte)) {
+		f->__status_bits |= __MLIBC_ERROR_BIT;
+		errno = EIO;
+		return -1;
+	}
+
 	frg::va_struct vs;
 	frg::arg arg_list[NL_ARGMAX + 1];
 	vs.arg_list = arg_list;
@@ -1712,6 +1751,12 @@ int vfprintf(FILE *__restrict stream, const char *__restrict format, __builtin_v
 int vfscanf(FILE *__restrict stream, const char *__restrict format, __builtin_va_list args) {
 	auto file = static_cast<mlibc::abstract_file *>(stream);
 	frg::unique_lock lock(file->_lock);
+
+	if (!file->check_orientation(mlibc::stream_orientation::byte)) {
+		file->__status_bits |= __MLIBC_ERROR_BIT;
+		errno = EIO;
+		return -1;
+	}
 
 	struct {
 		char look_ahead() {
@@ -1741,10 +1786,12 @@ int vfscanf(FILE *__restrict stream, const char *__restrict format, __builtin_va
 
 // byte-oriented (POSIX)
 int vprintf(const char *__restrict format, __builtin_va_list args){
+	// orientation checking in vfprintf
 	return vfprintf(stdout, format, args);
 }
 
 int vscanf(const char *__restrict format, __builtin_va_list args) {
+	// orientation checking in vfscanf
 	return vfscanf(stdin, format, args);
 }
 
@@ -1909,7 +1956,7 @@ int vswprintf(wchar_t *__restrict buffer, size_t n, const wchar_t *__restrict fo
 		errno = EINVAL;
 		return -1;
 	} else if (p.count >= n) {
-		errno = E2BIG;
+		errno = EOVERFLOW;
 		return -1;
 	}
 	if (n)
@@ -1965,11 +2012,18 @@ int vwscanf(const wchar_t *__restrict format, __builtin_va_list args) {
 
 // byte-oriented (POSIX)
 int fgetc(FILE *stream) {
-	char c;
+	auto f = static_cast<mlibc::abstract_file *>(stream);
+	if (!f->check_orientation(mlibc::stream_orientation::byte)) {
+		f->__status_bits |= __MLIBC_ERROR_BIT;
+		errno = EIO;
+		return EOF;
+	}
+
+	unsigned char c;
 	auto bytes_read = fread(&c, 1, 1, stream);
 	if(bytes_read != 1)
 		return EOF;
-	return c;
+	return static_cast<int>(c);
 }
 
 // byte-oriented (POSIX)
@@ -2154,7 +2208,7 @@ wint_t getwc(FILE *stream) {
 
 // wide-oriented (POSIX)
 wint_t getwchar(void) {
-	auto file = static_cast<mlibc::abstract_file *>(stdout);
+	auto file = static_cast<mlibc::abstract_file *>(stdin);
 	frg::unique_lock lock(file->_lock);
 	return fgetwc_unlocked(file);
 }
@@ -2185,6 +2239,13 @@ wint_t ungetwc(wint_t c, FILE *stream) {
 size_t fread(void *buffer, size_t size, size_t count, FILE *file_base) {
 	auto file = static_cast<mlibc::abstract_file *>(file_base);
 	frg::unique_lock lock(file->_lock);
+
+	if (!file->check_orientation(mlibc::stream_orientation::byte)) {
+		file->__status_bits |= __MLIBC_ERROR_BIT;
+		errno = EIO;
+		return EOF;
+	}
+
 	return fread_unlocked(buffer, size, count, file_base);
 }
 
@@ -2192,6 +2253,13 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *file_base) {
 size_t fwrite(const void *buffer, size_t size , size_t count, FILE *file_base) {
 	auto file = static_cast<mlibc::abstract_file *>(file_base);
 	frg::unique_lock lock(file->_lock);
+
+	if (!file->check_orientation(mlibc::stream_orientation::byte)) {
+		file->__status_bits |= __MLIBC_ERROR_BIT;
+		errno = EIO;
+		return EOF;
+	}
+
 	return fwrite_unlocked(buffer, size, count, file_base);
 }
 
@@ -2344,8 +2412,7 @@ void funlockfile(FILE *file_base) {
 }
 
 int ftrylockfile(FILE *file_base) {
-	static_cast<mlibc::abstract_file *>(file_base)->_lock.try_lock();
-	return 0;
+	return static_cast<mlibc::abstract_file *>(file_base)->_lock.try_lock() ? 0 : 1;
 }
 
 void clearerr_unlocked(FILE *file_base) {

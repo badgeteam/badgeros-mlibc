@@ -319,6 +319,8 @@ void openLocaleDatabase() {
 						getAllocator()
 					}
 				);
+				if (end != static_cast<size_t>(-1))
+					off += end + 1;
 			}
 		}
 		locpaths.push_back(frg::string<MemoryAllocator>{"/usr/lib/locale", getAllocator()});
@@ -332,7 +334,7 @@ void openLocaleDatabase() {
 		return;
 
 	struct stat info;
-	if (mlibc::sys_stat(mlibc::fsfd_target::path, -1, "/usr/lib/locale/locale-archive", 0, &info))
+	if (mlibc::sysdep_or_enosys<Stat>(mlibc::fsfd_target::path, -1, "/usr/lib/locale/locale-archive", 0, &info))
 		return;
 
 	auto window = smarter::allocate_shared<file_window>(getAllocator(), "/usr/lib/locale/locale-archive");
@@ -480,7 +482,7 @@ bool findLocaleFileRecord(int category, frg::string_view name, mlibc::localeinfo
 					return true;
 			} else {
 				struct stat info;
-				if (mlibc::sys_stat(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
+				if (mlibc::sysdep_or_enosys<Stat>(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
 					continue;
 
 				auto window = smarter::allocate_shared<file_window>(getAllocator(), path.data());

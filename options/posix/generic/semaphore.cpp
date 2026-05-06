@@ -2,9 +2,8 @@
 #include <errno.h>
 
 #include <bits/ensure.h>
-#include <mlibc/ansi-sysdeps.hpp>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/debug.hpp>
-#include <mlibc/posix-sysdeps.hpp>
 #include <mlibc/time-helpers.hpp>
 
 static constexpr unsigned int semaphoreHasWaiters = static_cast<uint32_t>(1 << 31);
@@ -38,7 +37,7 @@ int sem_wait(sem_t *sem) {
 		if (!(state & semaphoreCountMask)) {
 			if (__atomic_compare_exchange_n(&sem->__mlibc_count, &state, semaphoreHasWaiters,
 						false, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
-				int e = mlibc::sys_futex_wait((int *)&sem->__mlibc_count, state, nullptr);
+				int e = mlibc::sysdep<FutexWait>((int *)&sem->__mlibc_count, state, nullptr);
 				if (e == 0 || e == EAGAIN) {
 					continue;
 				} else if (e == EINTR) {
@@ -87,7 +86,7 @@ int sem_clockwait(sem_t *sem, clockid_t clockid, const struct timespec *abstime)
 					return -1;
 				}
 
-				int e = mlibc::sys_futex_wait((int *)&sem->__mlibc_count, state, &timeout);
+				int e = mlibc::sysdep<FutexWait>((int *)&sem->__mlibc_count, state, &timeout);
 
 				if (e == 0 || e == EAGAIN) {
 					continue;
@@ -110,17 +109,24 @@ int sem_clockwait(sem_t *sem, clockid_t clockid, const struct timespec *abstime)
 }
 
 int sem_post(sem_t *sem) {
-	auto old_count = __atomic_load_n(&sem->__mlibc_count, __ATOMIC_RELAXED) & semaphoreCountMask;
+	auto state = __atomic_load_n(&sem->__mlibc_count, __ATOMIC_RELAXED);
 
-	if (old_count + 1 > SEM_VALUE_MAX) {
-		errno = EOVERFLOW;
-		return -1;
+	while (true) {
+		auto count = state & semaphoreCountMask;
+
+		if (count + 1 > SEM_VALUE_MAX) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+
+		auto new_state = (count + 1) | (state & semaphoreHasWaiters);
+
+		if (__atomic_compare_exchange_n(&sem->__mlibc_count, &state, new_state, true, __ATOMIC_RELEASE, __ATOMIC_RELAXED))
+			break;
 	}
 
-	auto state = __atomic_exchange_n(&sem->__mlibc_count, old_count + 1, __ATOMIC_RELEASE);
-
 	if (state & semaphoreHasWaiters)
-		if (int e = mlibc::sys_futex_wake((int *)&sem->__mlibc_count, true); e)
+		if (int e = mlibc::sysdep<FutexWake>((int *)&sem->__mlibc_count, true); e)
 			__ensure(!"sys_futex_wake() failed");
 
 	return 0;

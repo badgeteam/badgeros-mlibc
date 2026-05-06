@@ -8,7 +8,6 @@ libc_sources += files(
 	'generic/getopt.cpp',
 	'generic/bsd_stdlib.cpp',
 	'generic/pty.cpp',
-	'generic/sys-statvfs.cpp',
 )
 
 if not no_headers

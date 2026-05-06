@@ -17,7 +17,7 @@
 #include <bits/ensure.h>
 #include <mlibc/debug.hpp>
 #include <mlibc/file-window.hpp>
-#include <mlibc/ansi-sysdeps.hpp>
+#include <mlibc/all-sysdeps.hpp>
 #include <mlibc/allocator.hpp>
 #include <mlibc/lock.hpp>
 #include <mlibc/locale.hpp>
@@ -106,15 +106,22 @@ struct tm *localtime(const time_t *unix_gmt) {
 	return localtime_r(unix_gmt, &per_thread_tm);
 }
 
-size_t strftime(char *__restrict dest, size_t max_size,
-		const char *__restrict format, const struct tm *__restrict tm) {
+size_t strftime(
+    char *__restrict dest,
+    size_t max_size,
+    const char *__restrict format,
+    const struct tm *__restrict tm
+) {
 	return mlibc::strftime(dest, max_size, format, tm, mlibc::getActiveLocale());
 }
 
-size_t wcsftime(wchar_t *__restrict, size_t, const wchar_t *__restrict,
-		const struct tm *__restrict) {
-	mlibc::infoLogger() << "mlibc: wcsftime is a stub" << frg::endlog;
-	return 0;
+size_t wcsftime(
+    wchar_t *__restrict dest,
+    size_t max_size,
+    const wchar_t *__restrict format,
+    const struct tm *__restrict tm
+) {
+	return mlibc::strftime(dest, max_size, format, tm, mlibc::getActiveLocale());
 }
 
 namespace {
@@ -459,12 +466,12 @@ bool parse_tzfile(const char *tz) {
 	frg::string<MemoryAllocator> path = parse_tzfile_path(tz);
 
 	// Check if file exists, otherwise fallback to the default.
-	if (!mlibc::sys_stat) {
+	if constexpr (!mlibc::IsImplemented<Stat>) {
 		MLIBC_MISSING_SYSDEP();
 		__ensure(!"cannot proceed without sys_stat");
 	}
 	struct stat info;
-	if (mlibc::sys_stat(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
+	if (mlibc::sysdep_or_panic<Stat>(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
 		return true;
 
 	// FIXME: Make this fallible so the above check is not needed.
@@ -588,17 +595,17 @@ int nanosleep(const struct timespec *req, struct timespec *rem) {
 		return -1;
 	}
 
-	if(!mlibc::sys_sleep) {
+	if constexpr (!mlibc::IsImplemented<Sleep>) {
 		MLIBC_MISSING_SYSDEP();
 		__ensure(!"Cannot continue without sys_sleep()");
 	}
 
 	struct timespec tmp = *req;
 
-	int e = mlibc::sys_sleep(&tmp.tv_sec, &tmp.tv_nsec);
+	int e = mlibc::sysdep_or_panic<Sleep>(&tmp.tv_sec, &tmp.tv_nsec);
 	if (!e)
 		return 0;
-	else if (e == EINTR)
+	else if (e == EINTR && rem)
 		*rem = tmp;
 
 	errno = e;
@@ -606,8 +613,7 @@ int nanosleep(const struct timespec *req, struct timespec *rem) {
 }
 
 int clock_getres(clockid_t clockid, struct timespec *res) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_clock_getres, -1);
-	if(int e = mlibc::sys_clock_getres(clockid, &res->tv_sec, &res->tv_nsec); e) {
+	if(int e = mlibc::sysdep_or_enosys<ClockGetres>(clockid, &res->tv_sec, &res->tv_nsec); e) {
 		errno = e;
 		return -1;
 	}
@@ -615,7 +621,7 @@ int clock_getres(clockid_t clockid, struct timespec *res) {
 }
 
 int clock_gettime(clockid_t clock, struct timespec *time) {
-	if(int e = mlibc::sys_clock_get(clock, &time->tv_sec, &time->tv_nsec); e) {
+	if(int e = mlibc::sysdep<ClockGet>(clock, &time->tv_sec, &time->tv_nsec); e) {
 		errno = e;
 		return -1;
 	}
@@ -628,7 +634,7 @@ int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, st
 	if (flags & TIMER_ABSTIME) {
 		time_t secs = 0;
 		long nanos = 0;
-		if(int e = mlibc::sys_clock_get(clockid, &secs, &nanos); e) {
+		if(int e = mlibc::sysdep<ClockGet>(clockid, &secs, &nanos); e) {
 			errno = e;
 			return -1;
 		}
@@ -643,7 +649,7 @@ int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, st
 			relativeTime.tv_sec = req->tv_sec - secs;
 			relativeTime.tv_nsec = req->tv_nsec - nanos;
 			if (relativeTime.tv_nsec < 0) {
-				relativeTime.tv_sec -= 0;
+				relativeTime.tv_sec -= 1;
 				relativeTime.tv_nsec += 1e9;
 			}
 		}
@@ -655,8 +661,7 @@ int clock_nanosleep(clockid_t clockid, int flags, const struct timespec *req, st
 }
 
 int clock_settime(clockid_t clock, const struct timespec *time) {
-	MLIBC_CHECK_OR_ENOSYS(mlibc::sys_clock_set, -1);
-	if(int e = mlibc::sys_clock_set(clock, time->tv_sec, time->tv_nsec); e) {
+	if(int e = mlibc::sysdep_or_enosys<ClockSet>(clock, time->tv_sec, time->tv_nsec); e) {
 		errno = e;
 		return -1;
 	}
@@ -666,7 +671,7 @@ int clock_settime(clockid_t clock, const struct timespec *time) {
 time_t time(time_t *out) {
 	time_t secs;
 	long nanos;
-	if(int e = mlibc::sys_clock_get(CLOCK_REALTIME, &secs, &nanos); e) {
+	if(int e = mlibc::sysdep<ClockGet>(CLOCK_REALTIME, &secs, &nanos); e) {
 		errno = e;
 		return (time_t)-1;
 	}
@@ -791,12 +796,12 @@ int unix_local_from_gmt_tzfile(time_t unix_gmt, time_t *offset, bool *dst, frg::
 	frg::string<MemoryAllocator> path = parse_tzfile_path(tz);
 
 	// Check if file exists
-	if (!mlibc::sys_stat) {
+	if constexpr (!mlibc::IsImplemented<Stat>) {
 		MLIBC_MISSING_SYSDEP();
 		__ensure(!"cannot proceed without sys_stat");
 	}
 	struct stat info;
-	if (mlibc::sys_stat(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
+	if (mlibc::sysdep_or_panic<Stat>(mlibc::fsfd_target::path, -1, path.data(), 0, &info))
 		return -1;
 
 	// FIXME: Make this fallible so the above check is not needed.

@@ -9,6 +9,10 @@ project(
 	meson_version: '>=1.3.0',
 )
 
+if meson.is_subproject()
+	error('mlibc cannot be correctly used as a meson subproject. Instead, bootstrap a compiler, use mlibc headers and mlibc proper to build a correct toolchain.')
+endif
+
 fs = import('fs')
 
 rtld_include_dirs = [
@@ -94,7 +98,7 @@ if not headers_only
 
 	libsmarter_dep = dependency(
 		'libsmarter',
-		default_options: [],
+		default_options: ['no_install=true'],
 		fallback: ['libsmarter', 'libsmarter_dep'],
 	)
 	libc_deps += libsmarter_dep
@@ -279,13 +283,13 @@ elif host_machine.system() == 'obos'
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	subdir('sysdeps/obos')
-elif host_machine.system() == 'menix'
-	rtld_include_dirs += include_directories('sysdeps/menix/include')
-	libc_include_dirs += include_directories('sysdeps/menix/include')
+elif host_machine.system() == 'zinnia'
+	rtld_include_dirs += include_directories('sysdeps/zinnia/include')
+	libc_include_dirs += include_directories('sysdeps/zinnia/include')
 	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
-	subdir('sysdeps/menix')
+	subdir('sysdeps/zinnia')
 elif host_machine.system() == 'badgeros'
 	rtld_include_dirs += include_directories('sysdeps/badgeros/include')
 	libc_include_dirs += include_directories('sysdeps/badgeros/include')
@@ -456,7 +460,6 @@ internal_sources = [
 	'options/internal/generic/threads.cpp',
 	'options/internal/generic/search.cpp',
 	'options/internal/generic/stdlib.cpp',
-	'options/internal/generic/time.cpp',
 	'options/internal/generic/wide.cpp',
 	'options/internal/gcc/stack_protector.cpp',
 	'options/internal/gcc/guard-abi.cpp',
@@ -510,6 +513,7 @@ if not no_headers
 		'options/internal/include/bits/search.h',
 		'options/internal/include/bits/getopt.h',
 		'options/internal/include/bits/reclen_t.h',
+		'options/internal/include/bits/timeval.h',
 		subdir: 'bits'
 	)
 endif

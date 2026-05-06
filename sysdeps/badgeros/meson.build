@@ -5,14 +5,15 @@ sysdep_supported_options = {
 }
 
 rtld_sources += files(
-	'generic/sysdeps-posix.cpp',
 	'generic/syscall.cpp',
+	'generic/sysdeps-posix.cpp',
 )
 
 libc_sources += files(
 	'generic/entry.cpp',
-	'generic/sysdeps-posix.cpp',
+	'generic/mntent.cpp',
 	'generic/syscall.cpp',
+	'generic/sysdeps-posix.cpp',
 )
 
 if not no_headers
@@ -86,6 +87,10 @@ if not no_headers
 		'include/sys/syscall.h',
 		'include/sys/sysmacros.h',
 		subdir: 'sys',
+		follow_symlinks: true
+	)
+	install_headers(
+		'include/mntent.h',
 		follow_symlinks: true
 	)
 endif
