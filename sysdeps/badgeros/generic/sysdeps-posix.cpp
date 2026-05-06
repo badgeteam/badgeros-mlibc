@@ -1,13 +1,6 @@
-#include "mlibc/tcb.hpp"
-#include <abi-bits/errno.h>
-#include <abi-bits/fcntl.h>
+
 #include <abi-bits/getid.h>
-#include <bits/ensure.h>
 #include <mlibc/all-sysdeps.hpp>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-#include <sys/resource.h>
 #include <sys/syscall.h>
 
 // ANCHOR: stub
@@ -20,72 +13,6 @@
 
 namespace mlibc {
 
-void Sysdeps<LibcPanic>::operator()() {
-	sysdep<LibcLog>("!!! mlibc panic !!!");
-	sysdep<Exit>(-1);
-	__builtin_trap();
-}
-
-void Sysdeps<LibcLog>::operator()(const char *msg) {
-	__syscall_fs_write(2, msg, strlen(msg));
-	__syscall_fs_write(2, "\n", 1);
-}
-
-int Sysdeps<Stat>::operator()(
-    fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf
-) {
-	if (fsfdt == fsfd_target::path) {
-		fd = AT_FDCWD;
-	} else if (fsfdt == fsfd_target::fd) {
-		path = nullptr;
-	} else {
-		__ensure(fsfdt == fsfd_target::fd_path);
-	}
-	// TODO: This syscall subject to change.
-	return -__syscall_fs_stat(fd, path, (flags & AT_SYMLINK_NOFOLLOW) == 0, statbuf);
-}
-
-int Sysdeps<Write>::operator()(int fd, void const *buf, size_t size, ssize_t *ret) {
-	*ret = __syscall_fs_write(fd, buf, size);
-	return *ret >= 0 ? 0 : -*ret;
-}
-
-int Sysdeps<TcbSet>::operator()(void *pointer) {
-	uintptr_t thread_data = reinterpret_cast<uintptr_t>(pointer) + sizeof(Tcb);
-	asm volatile("mv tp, %0" ::"r"(thread_data));
-	return 0;
-}
-
-int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
-	auto res =
-	    __syscall_mem_map(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS);
-	*pointer = (void *)res;
-	ssize_t errno = reinterpret_cast<intptr_t>(res);
-	return errno < 0 ? -errno : 0;
-}
-
-int Sysdeps<AnonFree>::operator()(void *pointer, unsigned long size) {
-	__syscall_mem_unmap(pointer, size);
-	return 0;
-}
-
-int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *ret) {
-	auto res = __syscall_fs_seek(fd, offset, whence);
-	*ret = res;
-	return res < 0 ? -res : 0;
-}
-
-void Sysdeps<Exit>::operator()(int status) {
-	__syscall_proc_exit(status);
-	__builtin_unreachable();
-}
-
-int Sysdeps<Close>::operator()(int fd) { return -__syscall_fs_close(fd); }
-
-int Sysdeps<FutexWake>::operator()(int *, bool) { STUB(); }
-
-int Sysdeps<FutexWait>::operator()(int *, int, timespec const *) { STUB(); }
-
 int Sysdeps<OpenDir>::operator()(const char *path, int *ret) {
 	// TODO: Mode currently ignored.
 	auto res = __syscall_fs_open(AT_FDCWD, path, O_DIRECTORY);
@@ -93,71 +20,10 @@ int Sysdeps<OpenDir>::operator()(const char *path, int *ret) {
 	return res < 0 ? -res : 0;
 }
 
-int Sysdeps<ReadEntries>::operator()(int fd, void *buffer, size_t max_size, size_t *bytes_read) {
-	auto res = __syscall_fs_getdents(fd, buffer, max_size);
-	*bytes_read = res;
-	return res < 0 ? -res : 0;
-}
-
-int Sysdeps<Read>::operator()(int fd, void *read_buf, unsigned long read_len, long *ret) {
-	auto res = __syscall_fs_read(fd, read_buf, read_len);
-	*ret = res;
-	return res < 0 ? -res : 0;
-}
-
-int Sysdeps<Open>::operator()(const char *path, int oflags, unsigned int mode, int *ret) {
-	(void)mode;
-	// TODO: Mode currently ignored.
-	auto res = __syscall_fs_open(AT_FDCWD, path, oflags);
-	*ret = res;
-	return res < 0 ? -res : 0;
-}
-
-int Sysdeps<VmMap>::operator()(
-    void *hint, size_t size, int prot, int flags, int, off_t, void **pointer
-) {
-	auto res = __syscall_mem_map(hint, size, prot, flags);
-	*pointer = (void *)res;
-	ssize_t errno = reinterpret_cast<intptr_t>(res);
-	return errno < 0 ? -errno : 0;
-}
-
-int Sysdeps<VmProtect>::operator()(void *pointer, size_t size, int prot) {
-	return -__syscall_mem_protect(pointer, size, prot);
-}
-
-int Sysdeps<VmUnmap>::operator()(void *address, size_t size) {
-	__syscall_mem_unmap(address, size);
-	return 0;
-}
-
-int Sysdeps<ClockGet>::operator()(int clkid, time_t *secs, long *nanos) {
-	struct timespec ts;
-	auto res = __syscall_time_gettime(clkid, &ts);
-	*secs = ts.tv_sec;
-	*nanos = ts.tv_nsec;
-	return -res;
-}
-
-int Sysdeps<Fork>::operator()(pid_t *child) {
-	pid_t res = __syscall_proc_fork();
-	if (res < 0) {
-		return -res;
-	} else {
-		*child = res;
-		return 0;
-	}
-}
-
-int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
-	return -__syscall_proc_exec(path, argv, envp);
-}
-
 gid_t Sysdeps<GetGid>::operator()() { return __syscall_proc_getid(_GETID_GID); }
 gid_t Sysdeps<GetEgid>::operator()() { return __syscall_proc_getid(_GETID_EGID); }
 uid_t Sysdeps<GetUid>::operator()() { return __syscall_proc_getid(_GETID_UID); }
 uid_t Sysdeps<GetEuid>::operator()() { return __syscall_proc_getid(_GETID_EUID); }
-pid_t Sysdeps<GetPid>::operator()() { return __syscall_proc_getid(_GETID_PID); }
 pid_t Sysdeps<GetTid>::operator()() { return __syscall_proc_getid(_GETID_TID); }
 pid_t Sysdeps<GetPpid>::operator()() { return __syscall_proc_getid(_GETID_PPID); }
 int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
@@ -167,34 +33,6 @@ int Sysdeps<GetPgid>::operator()(pid_t pid, pid_t *pgid) {
 int Sysdeps<GetSid>::operator()(pid_t pid, pid_t *sid) {
 	*sid = 1;
 	return 0;
-}
-
-int Sysdeps<Sigaction>::operator()(
-    int signum,
-    const struct sigaction *__restrict newhandler,
-    struct sigaction *__restrict oldhandler
-) {
-	if (newhandler) {
-		struct sigaction tmp = *newhandler;
-		tmp.sa_restorer = __syscall_proc_sigret;
-		return -__syscall_proc_sigaction(signum, &tmp, oldhandler);
-	} else {
-		return -__syscall_proc_sigaction(signum, nullptr, oldhandler);
-	}
-}
-
-int Sysdeps<Kill>::operator()(pid_t pid, int signo) { return -__syscall_proc_kill(pid, signo); }
-
-int
-Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
-	if (ru) {
-		memset(ru, 0, sizeof(struct rusage));
-	}
-	auto res = __syscall_proc_waitpid(pid, status, flags | WEXITED);
-	if (ret_pid) {
-		*ret_pid = res;
-	}
-	return res < 0 ? -res : 0;
 }
 
 int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
@@ -227,25 +65,11 @@ int Sysdeps<Symlinkat>::operator()(const char *target_path, int dirfd, const cha
 	return -__syscall_fs_symlink(target_path, dirfd, link_path);
 }
 
-int Sysdeps<Rename>::operator()(const char *old_path, const char *new_path) {
-	return -__syscall_fs_rename(AT_FDCWD, old_path, AT_FDCWD, new_path, 0);
-}
-
 int Sysdeps<Renameat>::operator()(
     int olddirfd, const char *old_path, int newdirfd, const char *new_path
 ) {
 	return -__syscall_fs_rename(olddirfd, old_path, newdirfd, new_path, 0);
 }
-
-int Sysdeps<Unlinkat>::operator()(int fd, const char *path, int flags) {
-	if (flags & AT_REMOVEDIR) {
-		return -__syscall_fs_rmdir(fd, path);
-	} else {
-		return -__syscall_fs_unlink(fd, path);
-	}
-}
-
-int Sysdeps<Rmdir>::operator()(const char *path) { return -__syscall_fs_rmdir(AT_FDCWD, path); }
 
 int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
 	auto res = __syscall_fs_dup(fd, flags, -1);
@@ -258,12 +82,6 @@ int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 	return res < 0 ? -res : 0;
 }
 
-int Sysdeps<Sigprocmask>::operator()(
-    int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve
-) {
-	return -__syscall_thread_sigmask(how, set, retrieve);
-}
-
 int Sysdeps<ThreadSigmask>::operator()(
     int how, const sigset_t *__restrict set, sigset_t *__restrict retrieve
 ) {
@@ -271,8 +89,6 @@ int Sysdeps<ThreadSigmask>::operator()(
 }
 
 int Sysdeps<Uname>::operator()(struct utsname *buf) { return -__syscall_sys_uname(buf); }
-
-int Sysdeps<Isatty>::operator()(int fd) { return -__syscall_fs_isatty(fd); }
 
 int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr) {
 	return -__syscall_fs_tcgetattr(fd, attr);

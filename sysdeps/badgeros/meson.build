@@ -6,14 +6,22 @@ sysdep_supported_options = {
 
 rtld_sources += files(
 	'generic/syscall.cpp',
+	'generic/sysdeps-ansi.cpp',
+	'generic/sysdeps-base.cpp',
 	'generic/sysdeps-posix.cpp',
+	'generic/sysdeps-bsd.cpp',
+	'generic/sysdeps-glibc.cpp',
 )
 
 libc_sources += files(
 	'generic/entry.cpp',
 	'generic/mntent.cpp',
 	'generic/syscall.cpp',
+	'generic/sysdeps-ansi.cpp',
+	'generic/sysdeps-base.cpp',
 	'generic/sysdeps-posix.cpp',
+	'generic/sysdeps-bsd.cpp',
+	'generic/sysdeps-glibc.cpp',
 )
 
 if not no_headers
