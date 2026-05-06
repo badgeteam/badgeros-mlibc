@@ -14,7 +14,6 @@
 namespace mlibc {
 
 int Sysdeps<OpenDir>::operator()(const char *path, int *ret) {
-	// TODO: Mode currently ignored.
 	auto res = __syscall_fs_open(AT_FDCWD, path, O_DIRECTORY);
 	*ret = res;
 	return res < 0 ? -res : 0;
