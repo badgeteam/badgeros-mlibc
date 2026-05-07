@@ -13,8 +13,8 @@ void Sysdeps<LibcPanic>::operator()() {
 }
 
 void Sysdeps<LibcLog>::operator()(const char *msg) {
-	__syscall_fs_write(2, msg, strlen(msg));
-	__syscall_fs_write(2, "\n", 1);
+	__syscall_sys_log(msg, strlen(msg));
+	__syscall_sys_log("\n", 1);
 }
 
 int Sysdeps<Stat>::operator()(
@@ -38,8 +38,9 @@ int Sysdeps<TcbSet>::operator()(void *pointer) {
 }
 
 int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
-	auto res =
-	    __syscall_mem_map(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS);
+	auto res = __syscall_mem_map(
+	    nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0
+	);
 	*pointer = (void *)res;
 	ssize_t errno = reinterpret_cast<intptr_t>(res);
 	return errno < 0 ? -errno : 0;
@@ -51,9 +52,9 @@ int Sysdeps<AnonFree>::operator()(void *pointer, unsigned long size) {
 }
 
 int Sysdeps<VmMap>::operator()(
-    void *hint, size_t size, int prot, int flags, int, off_t, void **pointer
+    void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **pointer
 ) {
-	auto res = __syscall_mem_map(hint, size, prot, flags);
+	auto res = __syscall_mem_map(hint, size, prot, flags, fd, offset);
 	*pointer = (void *)res;
 	ssize_t errno = reinterpret_cast<intptr_t>(res);
 	return errno < 0 ? -errno : 0;

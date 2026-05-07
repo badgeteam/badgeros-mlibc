@@ -92,6 +92,7 @@ if not no_headers
 		follow_symlinks: true
 	)
 	install_headers(
+		'include/sys/do_syscall_asm.h',
 		'include/sys/syscall.h',
 		'include/sys/sysmacros.h',
 		subdir: 'sys',

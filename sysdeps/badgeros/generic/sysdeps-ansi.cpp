@@ -4,6 +4,7 @@
 #include <mlibc/all-sysdeps.hpp>
 #include <string.h>
 #include <sys/syscall.h>
+#include <sys/types.h>
 
 // ANCHOR: stub
 #define STUB()                                                                                     \
@@ -16,7 +17,7 @@
 namespace mlibc {
 
 int Sysdeps<Write>::operator()(int fd, void const *buf, size_t size, ssize_t *ret) {
-	*ret = __syscall_fs_write(fd, buf, size);
+	*ret = __syscall_fs_write(fd, (__mlibc_uint8 const *)buf, size);
 	return *ret >= 0 ? 0 : -*ret;
 }
 
@@ -44,13 +45,13 @@ int Sysdeps<FutexWait>::operator()(int *, int, timespec const *) {
 }
 
 int Sysdeps<ReadEntries>::operator()(int fd, void *buffer, size_t max_size, size_t *bytes_read) {
-	auto res = __syscall_fs_getdents(fd, buffer, max_size);
+	auto res = __syscall_fs_getdents(fd, (__mlibc_uint8 *)buffer, max_size);
 	*bytes_read = res;
 	return res < 0 ? -res : 0;
 }
 
 int Sysdeps<Read>::operator()(int fd, void *read_buf, unsigned long read_len, long *ret) {
-	auto res = __syscall_fs_read(fd, read_buf, read_len);
+	auto res = __syscall_fs_read(fd, (__mlibc_uint8 *)read_buf, read_len);
 	*ret = res;
 	return res < 0 ? -res : 0;
 }
@@ -94,7 +95,7 @@ int Sysdeps<Sigaction>::operator()(
 ) {
 	if (newhandler) {
 		struct sigaction tmp = *newhandler;
-		tmp.sa_restorer = __syscall_proc_sigret;
+		tmp.sa_restorer = (void (*)())__syscall_proc_sigret;
 		return -__syscall_proc_sigaction(signum, &tmp, oldhandler);
 	} else {
 		return -__syscall_proc_sigaction(signum, nullptr, oldhandler);
