@@ -33,7 +33,12 @@ int Sysdeps<Stat>::operator()(
 
 int Sysdeps<TcbSet>::operator()(void *pointer) {
 	uintptr_t thread_data = reinterpret_cast<uintptr_t>(pointer) + sizeof(Tcb);
+#ifdef __riscv
 	asm volatile("mv tp, %0" ::"r"(thread_data));
+#endif
+#ifdef __x86_64__
+	__ensure(__syscall_sys_x86_set_fs_base(thread_data) == 0);
+#endif
 	return 0;
 }
 
