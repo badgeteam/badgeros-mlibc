@@ -1,1 +1,1 @@
-../../../../abis/linux/errno.h
+../../../../abis/badgeros/errno.h
