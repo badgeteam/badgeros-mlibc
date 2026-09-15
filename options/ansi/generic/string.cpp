@@ -579,6 +579,13 @@ char *strerror(int e) {
 	case ERESTART: s = "Interrupted system call should be restarted (ERESTART)"; break;
 	case EUSERS: s = "Too many users (EUSERS)"; break;
 
+#ifdef EALIGN
+	case EALIGN: s = "Address misaligned (EALIGN)"; break;
+#endif
+#ifdef EASSERT
+	case EASSERT: s = "Assertion failed (EASSERT)"; break;
+#endif
+
 #ifdef EIEIO
 	case EIEIO: s = "Computer bought the farm; OS internal error (EIEIO)"; break;
 #endif
